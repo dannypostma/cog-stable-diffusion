@@ -1,6 +1,10 @@
 import os
 from typing import List
 
+import urllib.request
+import zipfile
+import io
+
 import torch
 from cog import BasePredictor, Input, Path
 from diffusers import (
@@ -12,32 +16,50 @@ from diffusers import (
     EulerAncestralDiscreteScheduler,
     DPMSolverMultistepScheduler,
 )
+from diffusers.models import AutoencoderKL
 from diffusers.pipelines.stable_diffusion.safety_checker import (
     StableDiffusionSafetyChecker,
 )
 
 
-MODEL_ID = "dannypostma/stockdiffusion"
+MODEL_ID = "./output"
+# MODEL_ID = "runwayml/stable-diffusion-v1-5"
 MODEL_CACHE = "diffusers-cache"
 SAFETY_MODEL_ID = "CompVis/stable-diffusion-safety-checker"
-
 
 class Predictor(BasePredictor):
     def setup(self):
         """Load the model into memory to make running multiple predictions efficient"""
+
+        if not os.path.exists(os.path.join("output", 'args.json')):
+            print("Downloading model and unzipping")
+            # Create the output folder if it doesn't exist
+            if not os.path.exists('output'):
+                os.mkdir('output')
+
+            # Download the zip file and extract its contents to the output folder
+            with urllib.request.urlopen("https://storage.googleapis.com/stockai-stock-photos/output.zip") as response:
+                with zipfile.ZipFile(io.BytesIO(response.read())) as myzip:
+                    myzip.extractall('output')
+        
         print("Loading pipeline...")
-        safety_checker = StableDiffusionSafetyChecker.from_pretrained(
-            SAFETY_MODEL_ID,
-            cache_dir=MODEL_CACHE,
-            local_files_only=True,
-        )
+        # safety_checker = StableDiffusionSafetyChecker.from_pretrained(
+        #     MODEL_ID,
+        #     SAFETY_MODEL_ID,
+        #     cache_dir=MODEL_CACHE,
+        #     local_files_only=True,
+        # )
+        scheduler = EulerAncestralDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear")
+    
         self.pipe = StableDiffusionPipeline.from_pretrained(
             MODEL_ID,
-            safety_checker=safety_checker,
-            cache_dir=MODEL_CACHE,
-            local_files_only=True,
-            use_auth_token="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",
+            torch_dtype=torch.float16,
+            # vae=vae,
+            scheduler=scheduler,
             custom_pipeline="lpw_stable_diffusion",
+            #  safety_checker=safety_checker,
+            # cache_dir=MODEL_CACHE,
+            # local_files_only=True,
         ).to("cuda")
 
     @torch.inference_mode()
@@ -120,17 +142,17 @@ class Predictor(BasePredictor):
 
         output_paths = []
         for i, sample in enumerate(output.images):
-            if output.nsfw_content_detected and output.nsfw_content_detected[i]:
-                continue
+            # if output.nsfw_content_detected and output.nsfw_content_detected[i]:
+            #     continue
 
             output_path = f"/tmp/out-{i}.png"
             sample.save(output_path)
             output_paths.append(Path(output_path))
 
-        if len(output_paths) == 0:
-            raise Exception(
-                f"NSFW content detected. Try running it again, or try a different prompt."
-            )
+        # if len(output_paths) == 0:
+        #     raise Exception(
+        #         f"NSFW content detected. Try running it again, or try a different prompt."
+        #     )
 
         return output_paths
 
